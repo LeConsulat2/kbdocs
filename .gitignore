@@ -1,5 +1,14 @@
+# Ignore the Python virtual environment
 env/
+
+# Ignore generated PDF files
 pdfs/
+
+# Ignore staff documents
 staff/
+
+# Ignore temporary files and confidential documents
 here/
+
+# Ignore Excel files (optional, if you do not want to include any Excel files)
 *.xlsx
