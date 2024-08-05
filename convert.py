@@ -1,71 +1,39 @@
 import os
-import pypandoc
-from unidecode import unidecode
+import pandas as pd
 from docx import Document
 
-# Define the directory where the Word files are saved
-word_directory = r"C:\Users\Jonathan\Documents\kbdocs\here"
+# Load the Excel file from the provided path
+file_path = r"C:\Users\Jonathan\Documents\kbdocs\3-items.xlsx"
+excel_data = pd.read_excel(file_path)
 
-# Define the directory where the PDF files will be saved
-pdf_directory = r"C:\Users\Jonathan\Documents\kbdocs\pdfs"
+# Define the base save directory
+base_save_directory = r"C:\Users\Jonathan\Documents\kbdocs\staff"
 
-# Check if the PDF directory exists, if not, create it
-if not os.path.exists(pdf_directory):
-    os.makedirs(pdf_directory)
+# Iterate through each row in the DataFrame and save the Word documents in the specified directories
+for index, row in excel_data.iterrows():
+    # Get the content, name, and business owner from the respective columns
+    content = str(row["Content"]) if pd.notna(row["Content"]) else ""
+    name = str(row["Name"]) if pd.notna(row["Name"]) else "Unnamed"
+    business_owner = (
+        str(row["Business owner"]) if pd.notna(row["Business owner"]) else "Unknown"
+    )
 
+    # Create a directory for the business owner if it doesn't exist
+    business_owner_directory = os.path.join(base_save_directory, business_owner)
+    if not os.path.exists(business_owner_directory):
+        os.makedirs(business_owner_directory)
 
-# Function to clean text using unidecode
-def clean_text(text):
-    return unidecode(text)
+    # Create a new Document
+    doc = Document()
 
+    # Add the content to the Document
+    doc.add_paragraph(content)
 
-# Iterate through each Word document in the directory
-for filename in os.listdir(word_directory):
-    if filename.endswith(".docx"):
-        # Define the full file path for the Word document
-        word_file = os.path.join(word_directory, filename)
+    # Ensure the filename is valid
+    valid_filename = "".join(x for x in name if x.isalnum() or x in "._- ")
+    file_path = os.path.join(business_owner_directory, f"{valid_filename}.docx")
 
-        # Define the full file path for the PDF
-        pdf_file = os.path.join(pdf_directory, filename.replace(".docx", ".pdf"))
+    # Save the Document with the name from the 'Name' column
+    doc.save(file_path)
 
-        # Check if the PDF file already exists
-        if os.path.exists(pdf_file):
-            print(f"PDF already exists for {filename}, skipping conversion.")
-            continue  # Skip to the next file
-
-        try:
-            # Read the content of the Word document
-            doc = Document(word_file)
-            full_text = []
-            for paragraph in doc.paragraphs:
-                full_text.append(paragraph.text)
-            text_content = "\n".join(full_text)
-
-            # Use unidecode to handle unsupported characters
-            cleaned_content = clean_text(text_content)
-
-            # Write the cleaned content back to a temporary Word document
-            temp_word_file = os.path.join(word_directory, "temp.docx")
-            temp_doc = Document()
-            for paragraph in doc.paragraphs:
-                temp_doc.add_paragraph(clean_text(paragraph.text))
-            temp_doc.save(temp_word_file)
-
-            # Convert the cleaned Word document to PDF with selectable text
-            pypandoc.convert_file(
-                temp_word_file,
-                "pdf",
-                outputfile=pdf_file,
-                extra_args=["--pdf-engine=pdflatex"],
-            )
-
-            # Remove the temporary file
-            os.remove(temp_word_file)
-
-            print(f"Converted {filename} to PDF and saved to {pdf_directory}.")
-        except Exception as e:
-            print(f"Error converting {filename}: {e}")
-            if os.path.exists(temp_word_file):
-                os.remove(temp_word_file)
-
-print("All Word documents have been processed.")
+print("Word documents created successfully.")

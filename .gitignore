@@ -12,3 +12,5 @@ here/
 
 # Ignore Excel files (optional, if you do not want to include any Excel files)
 *.xlsx
+
+.env

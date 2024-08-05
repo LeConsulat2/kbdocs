@@ -17,14 +17,18 @@ from docx import Document
 username = ""
 password = ""
 sharepoint_site = "https://autuni.sharepoint.com"
-sharepoint_list_url = "https://autuni.sharepoint.com/sites/ssastudentadvisory/Lists/Service%20Knowledge%20Content%20uploader/Page.aspx?viewid=057a7b90%2Daa45%2D40df%2D9b43%2Dab6577c54d6f"
+sharepoint_list_url = "https://autuni.sharepoint.com/sites/knowledgebase-master/Lists/Knowledge%20Base/AllItems.aspx"
 
 # File paths
 excel_file_path = r"C:\Users\Jonathan\Documents\kbdocs\3-items.xlsx"
 base_save_directory = r"C:\Users\Jonathan\Documents\kbdocs\staff"
 
 # Initialize Selenium WebDriver
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
+options = webdriver.ChromeOptions()
+options.add_argument("--start-maximized")  # Ensure the browser is maximized
+driver = webdriver.Chrome(
+    service=Service(ChromeDriverManager().install()), options=options
+)
 
 
 def login_to_sharepoint(username, password):
@@ -51,15 +55,12 @@ def login_to_sharepoint(username, password):
         driver.save_screenshot("after_entering_password.png")
 
         # Handle "Stay signed in?" prompt
-        try:
-            stay_signed_in = WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.ID, "idSIButton9"))
-            )
-            stay_signed_in.click()
-            time.sleep(5)
-            driver.save_screenshot("after_stay_signed_in.png")
-        except:
-            print("No 'Stay signed in?' prompt detected.")
+        stay_signed_in = WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.ID, "idSIButton9"))
+        )
+        stay_signed_in.click()
+        time.sleep(5)
+        driver.save_screenshot("after_stay_signed_in.png")
 
         # Duo Mobile authentication
         WebDriverWait(driver, 60).until(EC.title_contains("Duo Mobile"))
@@ -68,16 +69,7 @@ def login_to_sharepoint(username, password):
             time.sleep(10)
         driver.save_screenshot("after_duo_authentication.png")
 
-        # Confirm device
-        yes_button = WebDriverWait(driver, 60).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//button[text()='Yes, this is my device']")
-            )
-        )
-        yes_button.click()
-        time.sleep(20)
-
-        # Finalize login
+        # Finalize login process
         WebDriverWait(driver, 60).until(
             EC.presence_of_element_located((By.ID, "idSIButton9"))
         )
@@ -85,7 +77,9 @@ def login_to_sharepoint(username, password):
         time.sleep(30)
         driver.save_screenshot("after_finalizing_login.png")
 
-        print("Please manually complete the second login. Waiting for 60 seconds...")
+        print(
+            "Please manually complete any additional login steps. Waiting for 60 seconds..."
+        )
         time.sleep(60)
 
     except Exception as e:
@@ -101,6 +95,11 @@ login_to_sharepoint(username, password)
 current_url = driver.current_url
 print(f"Current URL after login: {current_url}")
 
+if "Access Denied" in driver.page_source:
+    print("Access Denied. Check permissions and try again.")
+    driver.quit()
+    exit()
+
 # Perform additional actions
 driver.get(sharepoint_list_url)
 time.sleep(20)
@@ -111,7 +110,6 @@ input("Press Enter to continue after verifying access...")
 # Get authentication cookies
 cookies = driver.get_cookies()
 authcookie = {cookie["name"]: cookie["value"] for cookie in cookies}
-print("Authentication Cookies:", authcookie)
 
 # Optionally close the browser
 # driver.quit()
@@ -120,14 +118,6 @@ print("Authentication Cookies:", authcookie)
 session = requests.Session()
 for cookie in cookies:
     session.cookies.set(cookie["name"], cookie["value"])
-
-# Verify session cookies
-response = session.get(sharepoint_list_url)
-print("Session response status:", response.status_code)
-if response.status_code != 200:
-    print("Failed to access SharePoint list with session cookies.")
-    driver.quit()
-    raise Exception("Failed to access SharePoint list with session cookies.")
 
 # Login to SharePoint with cookies
 site = Site(
