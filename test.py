@@ -5,6 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support import expected_conditions as EC
 import traceback
 import os
@@ -16,32 +17,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def setup_chromedriver():
-    try:
-        # Path to the ChromeDriver in the virtual environment
-        chromedriver_path = (
-            "C:/Users/Jonathan/Documents/kbdocs/env/Lib/site-packages/chromedriver.exe"
-        )
-
-        # Add the ChromeDriver path to the system PATH
-        os.environ["PATH"] += os.pathsep + os.path.dirname(chromedriver_path)
-
-        return chromedriver_path
-    except Exception as e:
-        logger.error(f"Error setting up ChromeDriver: {e}")
-        logger.error(traceback.format_exc())
-        return None
-
-
-def setup_browser(chromedriver_path):
+def setup_browser():
     try:
         # Setup Chrome browser with the specified ChromeDriver path
         options = webdriver.ChromeOptions()
-        # Comment out or remove the headless option to show the browser
-        # options.add_argument('--headless')  # Disable headless mode to show the browser
-        options.add_argument("--disable-gpu")  # Disable GPU acceleration
         browser = webdriver.Chrome(
-            service=ChromeService(executable_path=chromedriver_path), options=options
+            service=ChromeService(ChromeDriverManager().install()), options=options
         )
         return browser
     except Exception as e:
@@ -108,26 +89,22 @@ def extract_page_content(browser):
 
 
 def main():
-    chromedriver_path = setup_chromedriver()
-    if chromedriver_path:
-        browser = setup_browser(chromedriver_path)
-        if browser is not None:
-            try:
-                perform_search(browser, "Selenium WebDriver")
-                if extract_search_results(browser):
-                    extract_page_content(browser)
-            except Exception as e:
-                logger.error(f"An error occurred: {e}")
-                logger.error(traceback.format_exc())
-            finally:
-                # Close the browser after the operation
-                time.sleep(5)  # Sleep for a while to see the results
-                browser.quit()
-                logger.info("Browser closed")
-        else:
-            logger.error("Failed to initialize the browser.")
+    browser = setup_browser()
+    if browser is not None:
+        try:
+            perform_search(browser, "MyAUT AUT")
+            if extract_search_results(browser):
+                extract_page_content(browser)
+        except Exception as e:
+            logger.error(f"An error occurred: {e}")
+            logger.error(traceback.format_exc())
+        finally:
+            # Close the browser after the operation
+            time.sleep(5)  # Sleep for a while to see the results
+            browser.quit()
+            logger.info("Browser closed")
     else:
-        logger.error("Failed to set up ChromeDriver.")
+        logger.error("Failed to initialize the browser.")
 
 
 if __name__ == "__main__":
