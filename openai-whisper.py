@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 # .env 파일 로드
 load_dotenv()
 
-# Whisper 모델 로드
-whisper_model = whisper.load_model("base")
+# Whisper 모델 로드 (Medium 모델, CPU 모드)
+whisper_model = whisper.load_model("medium", device="cpu")
 
 
 # 1. 오디오 파일을 WAV로 변환
