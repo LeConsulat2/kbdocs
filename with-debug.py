@@ -3,6 +3,7 @@ from pydub import AudioSegment
 import whisper
 from docx import Document
 from dotenv import load_dotenv
+import textwrap
 
 # .env 파일 로드
 load_dotenv()
@@ -11,6 +12,24 @@ load_dotenv()
 print("[INFO] Loading Whisper model (medium)...")
 whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
+
+
+# 텍스트 포맷팅 함수
+def format_transcription(transcription, line_length=80):
+    """
+    Formats the transcription text to make it more readable.
+    - Adds line breaks at sentence boundaries or every `line_length` characters.
+    """
+    # 텍스트를 문장 단위로 나누기 (마침표 기준으로 나눔)
+    sentences = transcription.replace("\n", " ").split(". ")
+    formatted_text = ""
+
+    for sentence in sentences:
+        # 문장을 지정된 길이에 따라 줄바꿈
+        wrapped = textwrap.fill(sentence.strip(), width=line_length)
+        formatted_text += wrapped + "\n\n"  # 문장 사이에 빈 줄 추가
+
+    return formatted_text.strip()  # 마지막 빈 줄 제거
 
 
 # 1. 오디오 파일을 WAV로 변환
@@ -47,7 +66,10 @@ def transcribe_audio_chunk(chunk, chunk_index):
     result = whisper_model.transcribe(temp_file)
     os.remove(temp_file)  # 임시 파일 삭제
     print(f"[INFO] Chunk {chunk_index + 1} transcription complete.")
-    return result["text"]
+
+    # 포맷팅 적용
+    formatted_text = format_transcription(result["text"])
+    return formatted_text
 
 
 # 4. 텍스트를 DOCX 파일로 저장
