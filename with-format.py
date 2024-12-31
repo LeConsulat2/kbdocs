@@ -19,17 +19,24 @@ def format_transcription(transcription, line_length=80):
     """
     Formats the transcription text to make it more readable.
     - Adds line breaks at sentence boundaries or every `line_length` characters.
+    - Attempts to separate code blocks and text.
     """
-    # 텍스트를 문장 단위로 나누기 (마침표 기준으로 나눔)
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
 
     for sentence in sentences:
-        # 문장을 지정된 길이에 따라 줄바꿈
-        wrapped = textwrap.fill(sentence.strip(), width=line_length)
-        formatted_text += wrapped + "\n\n"  # 문장 사이에 빈 줄 추가
+        # 코드 구분: 특정 키워드가 포함된 문장은 별도로 처리
+        if any(
+            keyword in sentence
+            for keyword in ["export", "const", "import", "function", "return", "{", "}"]
+        ):
+            formatted_text += "\n" + sentence.strip() + "\n"  # 코드 앞뒤로 줄바꿈 추가
+        else:
+            # 일반 텍스트는 지정된 길이에 따라 줄바꿈
+            wrapped = textwrap.fill(sentence.strip(), width=line_length)
+            formatted_text += wrapped + "\n\n"
 
-    return formatted_text.strip()  # 마지막 빈 줄 제거
+    return formatted_text.strip()
 
 
 # 1. 오디오 파일을 WAV로 변환
