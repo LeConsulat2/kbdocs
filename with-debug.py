@@ -9,7 +9,7 @@ load_dotenv()
 
 # Whisper 모델 로드 (Medium 모델, CPU 모드)
 print("[INFO] Loading Whisper model (medium)...")
-whisper_model = whisper.load_model("medium", device="cpu")
+whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
 
 
