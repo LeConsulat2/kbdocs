@@ -19,31 +19,22 @@ def format_transcription(transcription, line_length=80):
     """
     Formats transcription text for readability:
     - Adds line breaks for easier reading.
-    - Separates code and regular text based on patterns.
+    - Separates sentences based on specific patterns.
+    - Combines short sentences and adjusts flow.
     """
+    # 특정 키워드를 기준으로 문장 구분
+    keywords = ["Alright", "Okay", "Now", "So"]
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
 
     for sentence in sentences:
-        # 코드 스타일 문장을 구분
-        if any(
-            keyword in sentence
-            for keyword in [
-                "export",
-                "const",
-                "import",
-                "function",
-                "table",
-                "primary key",
-                "foreign key",
-                "{",
-                "}",
-            ]
-        ):
-            formatted_text += "\n" + sentence.strip() + "\n"
+        sentence = sentence.strip()
+        # 키워드로 문장 구분
+        if any(sentence.startswith(keyword) for keyword in keywords):
+            formatted_text += f"\n{sentence}\n\n"
         else:
-            # 일반 텍스트는 지정된 길이에 따라 줄바꿈
-            wrapped = textwrap.fill(sentence.strip(), width=line_length)
+            # 일반 문장은 줄바꿈 및 길이 조정
+            wrapped = textwrap.fill(sentence, width=line_length)
             formatted_text += wrapped + "\n\n"
 
     return formatted_text.strip()
