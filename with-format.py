@@ -17,17 +17,15 @@ print("[INFO] Whisper model loaded successfully!")
 # 텍스트 포맷팅 함수
 def format_transcription(transcription, line_length=80):
     """
-    Formats and refines transcription text:
-    - Adds line breaks for readability.
-    - Separates code blocks from text using specific patterns.
-    - Merges short sentences and improves flow.
+    Formats transcription text for readability:
+    - Adds line breaks for easier reading.
+    - Separates code and regular text based on patterns.
     """
-    transcription = refine_transcription(transcription)
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
 
     for sentence in sentences:
-        # 코드 탐지 및 처리
+        # 코드 스타일 문장을 구분
         if any(
             keyword in sentence
             for keyword in [
@@ -44,40 +42,11 @@ def format_transcription(transcription, line_length=80):
         ):
             formatted_text += "\n" + sentence.strip() + "\n"
         else:
-            # 일반 텍스트는 줄바꿈 및 정돈
+            # 일반 텍스트는 지정된 길이에 따라 줄바꿈
             wrapped = textwrap.fill(sentence.strip(), width=line_length)
             formatted_text += wrapped + "\n\n"
 
     return formatted_text.strip()
-
-
-# 텍스트 후처리 함수
-def refine_transcription(transcription):
-    """
-    Refines transcription to make it more readable:
-    - Merges short sentences.
-    - Fixes common guffaws or unnecessary repetitions.
-    """
-    lines = transcription.split("\n")
-    refined_text = ""
-    buffer = ""
-
-    for line in lines:
-        # 짧은 문장 처리
-        if len(line.strip()) < 50 and not line.strip().endswith((".", "?", "!")):
-            buffer += line.strip() + " "
-        else:
-            # 버퍼된 내용 출력
-            if buffer:
-                refined_text += buffer.strip() + " "
-                buffer = ""
-            refined_text += line.strip() + "\n\n"
-
-    # 마지막 버퍼 처리
-    if buffer:
-        refined_text += buffer.strip() + "\n\n"
-
-    return refined_text.strip()
 
 
 # 1. 오디오 파일을 WAV로 변환
