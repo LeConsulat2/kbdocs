@@ -21,7 +21,7 @@ def format_transcription(transcription, line_length=80):
     - Combines short sentences with contextually related lines.
     - Keeps keywords like 'Yes', 'Perfect' on the same line as the related sentence.
     """
-    keywords_to_combine = ["Yes", "Yep", "Perfect", "Fantastic"]
+    keywords_to_combine = ["Yes", "Yep", "Perfect", "Fantastic", "All right"]
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
     previous_line = ""
