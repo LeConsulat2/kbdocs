@@ -8,7 +8,7 @@ import textwrap
 # .env 파일 로드
 load_dotenv()
 
-# Whisper 모델 로드 (Medium 모델, CPU 모드)
+# Whisper 모델 로드 (Medium.en 모델, CPU 모드)
 print("[INFO] Loading Whisper model (medium.en)...")
 whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
@@ -17,26 +17,67 @@ print("[INFO] Whisper model loaded successfully!")
 # 텍스트 포맷팅 함수
 def format_transcription(transcription, line_length=80):
     """
-    Formats the transcription text to make it more readable.
-    - Adds line breaks at sentence boundaries or every `line_length` characters.
-    - Attempts to separate code blocks and text.
+    Formats and refines transcription text:
+    - Adds line breaks for readability.
+    - Separates code blocks from text using specific patterns.
+    - Merges short sentences and improves flow.
     """
+    transcription = refine_transcription(transcription)
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
 
     for sentence in sentences:
-        # 코드 구분: 특정 키워드가 포함된 문장은 별도로 처리
+        # 코드 탐지 및 처리
         if any(
             keyword in sentence
-            for keyword in ["export", "const", "import", "function", "return", "{", "}"]
+            for keyword in [
+                "export",
+                "const",
+                "import",
+                "function",
+                "table",
+                "primary key",
+                "foreign key",
+                "{",
+                "}",
+            ]
         ):
-            formatted_text += "\n" + sentence.strip() + "\n"  # 코드 앞뒤로 줄바꿈 추가
+            formatted_text += "\n" + sentence.strip() + "\n"
         else:
-            # 일반 텍스트는 지정된 길이에 따라 줄바꿈
+            # 일반 텍스트는 줄바꿈 및 정돈
             wrapped = textwrap.fill(sentence.strip(), width=line_length)
             formatted_text += wrapped + "\n\n"
 
     return formatted_text.strip()
+
+
+# 텍스트 후처리 함수
+def refine_transcription(transcription):
+    """
+    Refines transcription to make it more readable:
+    - Merges short sentences.
+    - Fixes common guffaws or unnecessary repetitions.
+    """
+    lines = transcription.split("\n")
+    refined_text = ""
+    buffer = ""
+
+    for line in lines:
+        # 짧은 문장 처리
+        if len(line.strip()) < 50 and not line.strip().endswith((".", "?", "!")):
+            buffer += line.strip() + " "
+        else:
+            # 버퍼된 내용 출력
+            if buffer:
+                refined_text += buffer.strip() + " "
+                buffer = ""
+            refined_text += line.strip() + "\n\n"
+
+    # 마지막 버퍼 처리
+    if buffer:
+        refined_text += buffer.strip() + "\n\n"
+
+    return refined_text.strip()
 
 
 # 1. 오디오 파일을 WAV로 변환
@@ -51,7 +92,7 @@ def convert_to_wav(file_path, output_directory):
     return wav_file_path
 
 
-# 2. 오디오 파일을 10분 단위로 나누는 함수
+# 2. 오디오 파일을 10분 단위로 나누기
 def split_audio(file_path, chunk_length_ms=10 * 60 * 1000):
     print(
         f"[INFO] Splitting audio file '{file_path}' into chunks of {chunk_length_ms // 60000} minutes..."
@@ -68,7 +109,7 @@ def split_audio(file_path, chunk_length_ms=10 * 60 * 1000):
 def transcribe_audio_chunk(chunk, chunk_index):
     temp_file = f"temp_chunk_{chunk_index}.wav"
     print(f"[INFO] Exporting chunk {chunk_index + 1} to temporary WAV file...")
-    chunk.export(temp_file, format="wav")  # WAV 파일로 임시 저장
+    chunk.export(temp_file, format="wav")  # 임시 WAV 파일 저장
     print(f"[INFO] Transcribing chunk {chunk_index + 1}...")
     result = whisper_model.transcribe(temp_file)
     os.remove(temp_file)  # 임시 파일 삭제
@@ -90,24 +131,17 @@ def save_transcription_to_docx(transcription, output_file):
 
 # 5. 전체 오디오 파일 처리
 def process_large_audio(file_path, output_directory):
-    # WAV 파일 변환
     wav_file_path = convert_to_wav(file_path, output_directory)
-
-    # WAV 파일을 10분 단위로 나누기
     chunks = split_audio(wav_file_path)
-
-    # 모든 청크를 텍스트로 변환
     full_transcript = ""
     for index, chunk in enumerate(chunks):
         print(f"[INFO] Processing chunk {index + 1}/{len(chunks)}...")
         chunk_transcript = transcribe_audio_chunk(chunk, index)
         full_transcript += f"\n[Chunk {index + 1}]\n{chunk_transcript}"
 
-    # 작업 완료 후 WAV 파일 삭제
     print(f"[INFO] Deleting temporary WAV file: {wav_file_path}...")
     os.remove(wav_file_path)
     print(f"[INFO] Temporary WAV file deleted.")
-
     return full_transcript
 
 
@@ -121,12 +155,8 @@ else:
     for media_file in media_files:
         audio_file_path = os.path.join(directory, media_file)
         print(f"[INFO] Processing file: {audio_file_path}")
-
-        # 1. 오디오 파일 텍스트 변환
         transcript = process_large_audio(audio_file_path, directory)
         print("[INFO] Transcription completed!")
-
-        # 2. DOCX 파일로 저장
         output_file_name = os.path.splitext(media_file)[0] + ".docx"
         output_file_path = os.path.join(directory, output_file_name)
         save_transcription_to_docx(transcript, output_file_path)
