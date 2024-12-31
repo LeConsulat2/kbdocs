@@ -14,28 +14,31 @@ whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
 
 
-# 텍스트 포맷팅 함수
 def format_transcription(transcription, line_length=80):
     """
     Formats transcription text for readability:
     - Adds line breaks for easier reading.
-    - Separates sentences based on specific patterns.
-    - Combines short sentences and adjusts flow.
+    - Combines short sentences with contextually related lines.
+    - Keeps keywords like 'Yes', 'Perfect' on the same line as the related sentence.
     """
-    # 특정 키워드를 기준으로 문장 구분
-    keywords = ["Alright", "Okay", "Now", "So"]
+    keywords_to_combine = ["Yes", "Yep", "Perfect", "Fantastic"]
     sentences = transcription.replace("\n", " ").split(". ")
     formatted_text = ""
+    previous_line = ""
 
     for sentence in sentences:
         sentence = sentence.strip()
-        # 키워드로 문장 구분
-        if any(sentence.startswith(keyword) for keyword in keywords):
-            formatted_text += f"\n{sentence}\n\n"
+
+        # 키워드가 포함된 경우 이전 문장과 병합
+        if any(sentence.startswith(keyword) for keyword in keywords_to_combine):
+            formatted_text = formatted_text.rstrip()  # 이전 줄 공백 제거
+            formatted_text += f" {sentence}\n\n"  # 같은 줄로 연결
         else:
             # 일반 문장은 줄바꿈 및 길이 조정
             wrapped = textwrap.fill(sentence, width=line_length)
             formatted_text += wrapped + "\n\n"
+
+        previous_line = sentence
 
     return formatted_text.strip()
 
