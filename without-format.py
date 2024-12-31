@@ -4,8 +4,8 @@ import whisper
 from docx import Document
 from dotenv import load_dotenv
 
-# .env 파일 로드
-load_dotenv()
+# .env 파일 로드 - 만약 gpt model 써서 요약 이런거 하거나 할거면 쓰는데, 여기는 필요없어서 주석 처리함
+# load_dotenv()
 
 # Whisper 모델 로드 (Medium 모델, CPU 모드)
 print("[INFO] Loading Whisper model (medium.en)...")
