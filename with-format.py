@@ -14,7 +14,7 @@ whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
 
 
-def format_transcription(transcription, line_length=80):
+def format_transcription(transcription, line_length=90):
     """
     Formats transcription text for readability:
     - Adds line breaks for easier reading.
