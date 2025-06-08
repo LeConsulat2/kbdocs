@@ -12,6 +12,10 @@ from docx.shared import Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from dotenv import load_dotenv
 
+# --- 추가된 임포트 ---
+import whisper
+# --------------------
+
 # Load environment variables
 load_dotenv()
 
@@ -26,16 +30,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
+# Initialize OpenAI client (for translation only)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class SubtitleStyleProcessor:
-    def __init__(self, transcribe_model: str = "gpt-4o-transcribe", translate_model: str = "gpt-4o"):
-        self.transcribe_model = transcribe_model
+    # --- transcribe_model 대신 local_whisper_model_name 추가 ---
+    def __init__(self, local_whisper_model_name: str = "medium", translate_model: str = "gpt-4o"):
+        self.transcribe_model_name = local_whisper_model_name # 모델 이름만 저장
         self.translate_model = translate_model
-        self.max_file_size_mb = 25
-        
-        # Nomad Coders specific patterns
+        self.max_file_size_mb = 25 # 이 값은 OpenAI API 사용 시 유효하며, 로컬 Whisper는 메모리 허용 범위 내에서 더 큰 파일도 처리 가능
+
+        logger.info(f"Loading local Whisper model: '{self.transcribe_model_name}'...")
+        try:
+            self.whisper_model = whisper.load_model(self.transcribe_model_name)
+            logger.info(f"Local Whisper model '{self.transcribe_model_name}' loaded successfully.")
+        except Exception as e:
+            logger.error(f"Error loading local Whisper model: {e}")
+            logger.error("Please ensure 'openai-whisper' is installed (`pip install openai-whisper`) "
+                         "and ffmpeg is in your system's PATH.")
+            raise # 모델 로드 실패 시 종료
+
+        # Nomad Coders specific patterns (변동 없음)
         self.short_phrases = [
             "okay", "alright", "fantastic", "perfect", "cool", "great", "nice", 
             "good", "yes", "yep", "no", "nope", "right", "exactly", "boom",
@@ -49,38 +64,53 @@ class SubtitleStyleProcessor:
         ]
 
     def transcribe_with_timestamps(self, audio_file_path: str) -> dict:
-        """Transcribe with detailed timestamps for better segmentation."""
+        """
+        Transcribe with detailed timestamps using the local Whisper model.
+        Returns a dictionary mimicking OpenAI's verbose_json for compatibility.
+        """
+        logger.info(f"Transcribing audio with local Whisper model '{self.transcribe_model_name}'...")
         try:
-            with open(audio_file_path, "rb") as audio_file:
-                response = client.audio.transcriptions.create(
-                    model=self.transcribe_model,
-                    file=audio_file,
-                    language="en",
-                    prompt="This is Nomad Coders coding lecture by Nicolas. He speaks in short phrases with pauses. Please maintain natural speech boundaries and include filler words like 'okay', 'alright', 'fantastic'.",
-                    response_format="verbose_json",
-                    temperature=0.0,
-                    timestamp_granularities=["word"]
-                )
-                
-                return response
+            # Local Whisper 모델을 사용하여 전사
+            # word_timestamps=True는 단어별 타임스탬프를 제공합니다.
+            # initial_prompt는 OpenAI의 'prompt'와 유사하게 동작합니다.
+            result = self.whisper_model.transcribe(
+                audio_file_path,
+                word_timestamps=True,
+                language="en",
+                initial_prompt="This is Nomad Coders coding lecture by Nicolas. He speaks in short phrases with pauses. Please maintain natural speech boundaries and include filler words like 'okay', 'alright', 'fantastic'.",
+                verbose=False # Whisper 자체의 상세 출력을 억제
+            )
+            
+            # 로컬 Whisper의 출력 형식을 OpenAI verbose_json과 유사하게 변환
+            # OpenAI verbose_json은 'words' 키에 모든 단어 리스트를 포함합니다.
+            # Local Whisper는 'segments' 안에 각 세그먼트의 'words'를 포함합니다.
+            
+            all_words = []
+            full_text = ""
+            if 'segments' in result:
+                for segment in result['segments']:
+                    full_text += segment['text'] + " "
+                    if 'words' in segment:
+                        all_words.extend(segment['words'])
+            else: # Fallback if 'segments' is not present (unlikely with word_timestamps=True)
+                full_text = result.get('text', '')
+
+            # 'text'와 'words' 키를 가진 딕셔너리로 반환하여 `process_transcription_to_subtitles`와 호환되게 함
+            return {"text": full_text.strip(), "words": all_words}
                 
         except Exception as e:
-            logger.error(f"Error transcribing with timestamps: {e}")
-            # Fallback without timestamps
-            with open(audio_file_path, "rb") as audio_file:
-                response = client.audio.transcriptions.create(
-                    model=self.transcribe_model,
-                    file=audio_file,
-                    language="en",
-                    response_format="text",
-                    temperature=0.0
-                )
-                return {"text": response}
+            logger.error(f"Error transcribing with local Whisper: {e}")
+            # 로컬 Whisper 사용 시에는 파일 오픈 에러 외에는 바로 텍스트로 폴백하는 경우가 적음
+            # 대신 에러 발생 시 빈 텍스트라도 반환하여 다음 단계가 진행될 수 있도록 처리
+            return {"text": "", "words": []}
 
     def smart_sentence_split(self, text: str, words_data: List = None) -> List[str]:
         """
         Smart splitting that mimics Nicolas's natural speech patterns.
         Tries to create subtitle-length segments.
+        Note: This function currently uses text-based splitting.
+        To use 'words_data' (timestamps) for more accurate, speech-timed splitting,
+        this function would need a significant rewrite.
         """
         # First, clean the text
         text = re.sub(r'\s+', ' ', text.strip())
@@ -134,6 +164,7 @@ class SubtitleStyleProcessor:
     def translate_segment_precise(self, english_segment: str) -> str:
         """
         Translate a single segment with precise Nomad Coders style.
+        (이 함수는 OpenAI API를 그대로 사용합니다)
         """
         translation_prompt = f"""너는 노마드코더(Nomad Coders)의 니콜라스 강의를 번역하는 역할이야.
 니콜라스의 스타일은 다음과 같아:
@@ -239,7 +270,8 @@ This table references the post ID and the profile ID.
         
         try:
             audio = AudioSegment.from_file(file_path)
-            audio = audio.set_frame_rate(16000).set_channels(1)
+            # Whisper는 16kHz, 모노 채널을 선호하며, 자동으로 변환하긴 하지만 명시적으로 설정하는 것이 좋습니다.
+            audio = audio.set_frame_rate(16000).set_channels(1) 
             
             wav_file_path = os.path.join(
                 output_directory, 
@@ -306,19 +338,22 @@ This table references the post ID and the profile ID.
         
         try:
             # Convert to WAV if needed
+            # 로컬 Whisper는 다양한 오디오 포맷을 지원하지만,
+            # pydub를 통한 WAV 변환은 안정성과 일관성을 위해 유지합니다.
             if not file_path.lower().endswith('.wav'):
                 wav_file = self.convert_to_wav(file_path, temp_dir)
             else:
                 wav_file = file_path
             
-            # Check file size
+            # Check file size (로컬 Whisper는 25MB 제한을 받지 않으나, 메모리 사용량은 고려해야 함)
             file_size_mb = os.path.getsize(wav_file) / (1024 * 1024)
             if file_size_mb > self.max_file_size_mb:
-                logger.warning(f"File too large ({file_size_mb:.1f}MB). Consider splitting manually.")
-                # You could add chunking logic here if needed
+                logger.warning(f"File size is {file_size_mb:.1f}MB, which is large. "
+                               "Local Whisper can handle larger files, but performance depends on hardware. "
+                               "Consider manually splitting very large files if issues occur.")
+                # 긴 파일 처리 시 여기서 오디오 청킹 로직을 추가할 수 있습니다.
             
             # Transcribe with timestamps
-            logger.info("Transcribing audio...")
             transcription_data = self.transcribe_with_timestamps(wav_file)
             
             # Process to subtitle format
@@ -355,8 +390,11 @@ def main():
     supported_formats = ('.mp4', '.mp3', '.wav', '.m4a')
     
     # Initialize processor
+    # local_whisper_model_name: "tiny", "base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"
+    # 모델 크기가 커질수록 정확도는 높아지지만, 필요한 메모리(VRAM)와 처리 시간도 증가합니다.
+    # GPU가 없다면 "base" 또는 "small" 모델이 적절할 수 있습니다.
     processor = SubtitleStyleProcessor(
-        transcribe_model="gpt-4o-transcribe",
+        local_whisper_model_name="base", # 여기에 사용할 로컬 Whisper 모델 이름 지정
         translate_model="gpt-4o"
     )
     
