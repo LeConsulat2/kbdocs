@@ -20,3 +20,5 @@ text_result/
 fun/
 
 uni/
+
+*.log
