@@ -1,7 +1,6 @@
 import os
-from pydub import AudioSegment
-import whisper
 from docx import Document
+import whisper
 from dotenv import load_dotenv
 import openai
 from openai import OpenAI
@@ -125,28 +124,14 @@ def translate_chunk_with_gpt(text_chunk, chunk_index):
         return formatted
 
 
-def convert_to_wav(file_path, output_directory):
-    print(f"[INFO] Converting '{file_path}' to WAV format...")
-    audio = AudioSegment.from_file(file_path)
-    wav_file_path = os.path.join(
-        output_directory, os.path.splitext(os.path.basename(file_path))[0] + ".wav"
-    )
-    audio.export(wav_file_path, format="wav")
-    print(f"[INFO] Conversion complete. Saved as '{wav_file_path}'")
-    return wav_file_path
-
-
 def transcribe_and_translate_audio(file_path, output_directory, subtitle_duration=30):
     """
     Main function that transcribes and translates in one process
     subtitle_duration: target duration for each subtitle chunk in seconds
     """
-    # Convert to WAV
-    wav_file_path = convert_to_wav(file_path, output_directory)
-
-    # Transcribe with word-level timestamps
-    print(f"[INFO] Transcribing '{wav_file_path}' with timestamps...")
-    result = whisper_model.transcribe(wav_file_path, word_timestamps=True)
+    # Transcribe directly with word-level timestamps
+    print(f"[INFO] Transcribing '{file_path}' directly with timestamps...")
+    result = whisper_model.transcribe(file_path, word_timestamps=True)
 
     # Split into subtitle-appropriate chunks
     print(f"[INFO] Splitting transcription into {subtitle_duration}-second chunks...")
@@ -177,36 +162,10 @@ def transcribe_and_translate_audio(file_path, output_directory, subtitle_duratio
         # Small delay to avoid rate limiting
         time.sleep(0.5)
 
-    # Clean up
-    print(f"[INFO] Deleting temporary WAV file: {wav_file_path}...")
-    os.remove(wav_file_path)
-
     return full_translated_content
 
 
-# def save_to_docx(content, output_file):
-#     print(f"[INFO] Saving to '{output_file}'...")
-#     doc = Document()
-
-#     # Split content into lines and add formatting
-#     lines = content.split("\n")
-#     for line in lines:
-#         if line.strip():
-#             if line.startswith("**") and line.endswith("**"):
-#                 # Bold English text
-#                 p = doc.add_paragraph()
-#                 run = p.add_run(line[2:-2])  # Remove ** markers
-#                 run.bold = True
-#             else:
-#                 # Regular Korean translation or other text
-#                 doc.add_paragraph(line)
-
-#     doc.save(output_file)
-#     print(f"[INFO] File saved successfully!")
-
-
 def save_to_docx(content, output_file):
-
     print(f"[INFO] Saving to '{output_file}'...")
     doc = Document()
 
