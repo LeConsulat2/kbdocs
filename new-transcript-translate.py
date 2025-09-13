@@ -19,9 +19,7 @@ whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
 
 # Updated translation prompt with user's improvements
-TRANSLATION_PROMPT = (
-    TRANSLATION_PROMPT
-) = """너는 노마드코더(Nomad Coders)의 니콜라스 강의를 번역하는 역할이야.
+TRANSLATION_PROMPT = """너는 노마드코더(Nomad Coders)의 니콜라스 강의를 번역하는 역할이야.
 
 니콜라스의 스타일은 다음과 같아:
 • 캐주얼하고 재미있는 말투
