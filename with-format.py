@@ -118,7 +118,7 @@ def process_large_audio(file_path, output_directory):
 
 # 메인 실행
 directory = r"C:\Users\Jonathan\Documents\kbdocs\text_result"
-media_files = [f for f in os.listdir(directory) if f.endswith((".mp4", ".mp3"))]
+media_files = [f for f in os.listdir(directory) if f.endswith((".mp4", ".mp3", ".m4a"))]
 
 if not media_files:
     print("[WARNING] No media files found in the directory.")

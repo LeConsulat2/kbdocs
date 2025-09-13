@@ -1,260 +1,188 @@
 import os
-from pydub import AudioSegment
+import math
+import numpy as np
+from pydub import AudioSegment  # (kept because your original code used it)
 import whisper
 from docx import Document
-from dotenv import load_dotenv
-import openai
-from openai import OpenAI
-import re
-import time
 
-# Load environment variables
-load_dotenv()
+# from dotenv import load_dotenv   # not needed now
+import textwrap
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# =========================
+# Config
+# =========================
+USE_CHUNKING = (
+    False  # False = simplest path (no splitting). True = in-memory chunking (~10 min)
+)
+SAMPLE_RATE = 16000  # whisper.load_audio outputs 16k mono float32
+CHUNK_SECONDS = 10 * 60
+CHUNK_SAMPLES = CHUNK_SECONDS * SAMPLE_RATE
 
-# Whisper model
-print("[INFO] Loading Whisper model (medium.en)...")
+# =========================
+# Model
+# =========================
+print("[INFO] Loading Whisper model (medium.en) on CPU...")
 whisper_model = whisper.load_model("medium.en", device="cpu")
 print("[INFO] Whisper model loaded successfully!")
 
-# Translation prompt
-TRANSLATION_PROMPT = """너는 노마드코더(Nomad Coders)의 니콜라스 강의를 번역하는 역할이야.
 
-니콜라스의 스타일은 다음과 같아:
-• 캐주얼하고 재미있는 말투
-• 실용적이고 직관적인 설명
-• 격식 없는 자연스러운 대화체
-
-번역 규칙
-• 입력된 transcript(영어 원문)는 한 번에 여러 줄로 주어질 수 있어. 네 역할은 이를 **자연스러운 자막 단위(짧고 간결한 구간)**로 끊어서 정리하는 거야.
-• 한 문장을 무조건 하나로 자르지 말고, 맥락이나 강조 포인트 단위로 1~2줄씩 끊어줘.
-• 영어 문장은 절대 수정하지 않고 그대로 두고, 굵게 표시 (bold).
-• 바로 아래에 한국어 번역을 붙여. 한국어 번역은 자연스럽고 캐주얼하게, "해, 할 거야, 하는 거지, 그렇고" 같은 대화체로 작성해.
-• 헤딩, 구분선 같은 건 넣지 말고 깔끔하게 이어서 작성해.
-• 전문 용어(import, function, class, async/await, coroutine, decorator, variable, API, endpoint, JSON, YAML, pip, venv, package manager, CrewAI, AutoGen, OpenAI Agents SDK, LangGraph, Google Agent Builder, kit, LLM, prompt, system message, user message, state, tool, agent, workflow, orchestrator 등)는 번역하지 않고 그대로 둬.
-• snake_case / camelCase / kebab-case / SNAKE_CASE 등은 그대로 유지 (예: profile_id, user_id, product_id).
-• 코드 블록(python, bash, json 등)은 번역하지 않고 그대로 둬.
-• 특정한 행동이나 작성 지시가 포함된 경우 (예: "위 같이 작성," "화면 참조," "추가사항 적용")는 문맥에 맞게 간결하고 자연스럽게 설명해.
-• '사용자'라는 표현 대신 '유저'를 사용해.
-
-출력 예시
-
-All right everybody it is now time to set up our environment
-좋아 모두, 이제 environment를 설정할 시간이야.
-
-and not to set up one environment
-근데 딱 하나만 설정하는 게 아니야.
-
-I just want to show you how to set up a environment
-내가 보여주려는 건 environment 만드는 방법이야.
-
-because the way we're going to work in this course is by dividing and conquering okay
-이번 코스는 divide and conquer 방식으로 진행할 거거든:"""
-
-
-def split_by_sentences_with_timing(transcription_segments, max_duration=30):
+# =========================
+# Helpers
+# =========================
+def format_transcription(transcription, line_length=90):
     """
-    Split transcription into subtitle-appropriate chunks based on timing and sentences
-    max_duration: maximum seconds per subtitle chunk
+    Formats transcription text for readability:
+    - Adds line breaks for easier reading.
+    - Combines short sentences with contextually related lines.
+    - Keeps keywords like 'Yes', 'Perfect' on the same line as the related sentence.
     """
-    chunks = []
-    current_chunk = {"text": "", "start": None, "end": None}
+    keywords_to_combine = [
+        "Yes",
+        "Yep",
+        "Perfect",
+        "Okay",
+        "Fantastic",
+        "All right",
+        "Cool",
+    ]
+    sentences = transcription.replace("\n", " ").split(". ")
+    formatted_text = ""
 
-    for segment in transcription_segments:
-        segment_duration = segment["end"] - segment["start"]
-
-        # If adding this segment would make chunk too long, finish current chunk
-        if (
-            current_chunk["start"] is not None
-            and segment["end"] - current_chunk["start"] > max_duration
-        ):
-
-            if current_chunk["text"].strip():
-                chunks.append(current_chunk)
-
-            current_chunk = {
-                "text": segment["text"].strip(),
-                "start": segment["start"],
-                "end": segment["end"],
-            }
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if any(sentence.startswith(keyword) for keyword in keywords_to_combine):
+            formatted_text = formatted_text.rstrip()
+            formatted_text += f" {sentence}\n\n"
         else:
-            # Add to current chunk
-            if current_chunk["start"] is None:
-                current_chunk["start"] = segment["start"]
-            current_chunk["end"] = segment["end"]
-            current_chunk["text"] += " " + segment["text"].strip()
+            wrapped = textwrap.fill(sentence, width=line_length)
+            formatted_text += wrapped + "\n\n"
 
-    # Add final chunk
-    if current_chunk["text"].strip():
-        chunks.append(current_chunk)
-
-    return chunks
+    return formatted_text.strip()
 
 
-def translate_chunk_with_gpt(text_chunk, chunk_index):
-    """
-    Translate a text chunk using GPT-4o-mini
-    """
-    try:
-        print(f"[INFO] Translating chunk {chunk_index + 1}...")
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": TRANSLATION_PROMPT},
-                {"role": "user", "content": text_chunk},
-            ],
-            temperature=0.3,
-            max_tokens=15000,
-        )
-
-        translation = response.choices[0].message.content
-        print(f"[INFO] Chunk {chunk_index + 1} translation complete.")
-        return translation
-
-    except Exception as e:
-        print(f"[ERROR] Translation failed for chunk {chunk_index + 1}: {e}")
-        # Fallback: return original text with basic formatting
-        lines = text_chunk.split(".")
-        formatted = ""
-        for line in lines:
-            if line.strip():
-                formatted += f"**{line.strip()}**\n번역 실패\n\n"
-        return formatted
-
-
-def convert_to_wav(file_path, output_directory):
-    print(f"[INFO] Converting '{file_path}' to WAV format...")
-    audio = AudioSegment.from_file(file_path)
-    wav_file_path = os.path.join(
-        output_directory, os.path.splitext(os.path.basename(file_path))[0] + ".wav"
-    )
-    audio.export(wav_file_path, format="wav")
-    print(f"[INFO] Conversion complete. Saved as '{wav_file_path}'")
-    return wav_file_path
-
-
-def transcribe_and_translate_audio(file_path, output_directory, subtitle_duration=30):
-    """
-    Main function that transcribes and translates in one process
-    subtitle_duration: target duration for each subtitle chunk in seconds
-    """
-    # Convert to WAV
-    wav_file_path = convert_to_wav(file_path, output_directory)
-
-    # Transcribe with word-level timestamps
-    print(f"[INFO] Transcribing '{wav_file_path}' with timestamps...")
-    result = whisper_model.transcribe(wav_file_path, word_timestamps=True)
-
-    # Split into subtitle-appropriate chunks
-    print(f"[INFO] Splitting transcription into {subtitle_duration}-second chunks...")
-    chunks = split_by_sentences_with_timing(result["segments"], subtitle_duration)
-    print(f"[INFO] Created {len(chunks)} subtitle chunks.")
-
-    # Translate each chunk
-    full_translated_content = ""
-    for index, chunk in enumerate(chunks):
-        print(
-            f"[INFO] Processing chunk {index + 1}/{len(chunks)} ({chunk['start']:.1f}s - {chunk['end']:.1f}s)"
-        )
-
-        # Clean up the text
-        clean_text = chunk["text"].strip()
-        if not clean_text:
-            continue
-
-        # Translate
-        translated_chunk = translate_chunk_with_gpt(clean_text, index)
-
-        # Add timing info and content
-        full_translated_content += (
-            f"\n[Chunk {index + 1}] ({chunk['start']:.1f}s - {chunk['end']:.1f}s)\n"
-        )
-        full_translated_content += translated_chunk + "\n\n"
-
-        # Small delay to avoid rate limiting
-        time.sleep(0.5)
-
-    # Clean up
-    print(f"[INFO] Deleting temporary WAV file: {wav_file_path}...")
-    os.remove(wav_file_path)
-
-    return full_translated_content
-
-
-# def save_to_docx(content, output_file):
-#     print(f"[INFO] Saving to '{output_file}'...")
-#     doc = Document()
-
-#     # Split content into lines and add formatting
-#     lines = content.split("\n")
-#     for line in lines:
-#         if line.strip():
-#             if line.startswith("**") and line.endswith("**"):
-#                 # Bold English text
-#                 p = doc.add_paragraph()
-#                 run = p.add_run(line[2:-2])  # Remove ** markers
-#                 run.bold = True
-#             else:
-#                 # Regular Korean translation or other text
-#                 doc.add_paragraph(line)
-
-#     doc.save(output_file)
-#     print(f"[INFO] File saved successfully!")
-
-
-def save_to_docx(content, output_file):
-
-    print(f"[INFO] Saving to '{output_file}'...")
+def save_transcription_to_docx(transcription, output_file):
+    print(f"[INFO] Saving transcription to '{output_file}'...")
     doc = Document()
-
-    bold_re = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")  # 앞뒤 공백/개행 허용, **...** 캡처
-
-    # 줄 단위 순회 (개행·공백 정리)
-    lines = content.splitlines()
-
-    for raw in lines:
-        line = raw.rstrip()  # 오른쪽 공백 제거 (Markdown의 '두 칸 공백+개행' 무력화)
-        if not line:
-            continue
-
-        # [Chunk N] 타이밍 헤더는 그대로 추가
-        if line.startswith("[Chunk "):
-            doc.add_paragraph(line)
-            continue
-
-        # **영어** 패턴이면 굵게
-        m = bold_re.match(line)
-        if m:
-            p = doc.add_paragraph()
-            run = p.add_run(m.group(1))
-            run.bold = True
-            continue
-
-        # 혹시 앞은 **로 시작하지만 끝에 **가 빠진 사례까지 케어
-        if line.lstrip().startswith("**"):
-            # 맨 앞 ** 제거 후, 닫는 **가 있으면 잘라냄
-            stripped = line.lstrip()[2:]
-            end = stripped.find("**")
-            text = stripped[:end] if end != -1 else stripped
-            p = doc.add_paragraph()
-            run = p.add_run(text.strip())
-            run.bold = True
-            continue
-
-        # 일반 번역 줄
-        doc.add_paragraph(line)
-
+    doc.add_paragraph(transcription)
     doc.save(output_file)
-    print(f"[INFO] File saved successfully!")
+    print(f"[INFO] Transcription saved successfully!")
 
 
-# Main execution
+# =========================
+# (ORIGINAL DISK-BASED HELPERS) — NOW UNUSED
+# Kept for reference; we no longer call these.
+# =========================
+# def convert_to_wav(file_path, output_directory):
+#     print(f"[INFO] Converting '{file_path}' to WAV format...")
+#     audio = AudioSegment.from_file(file_path)
+#     wav_file_path = os.path.join(
+#         output_directory, os.path.splitext(os.path.basename(file_path))[0] + ".wav"
+#     )
+#     audio.export(wav_file_path, format="wav")
+#     print(f"[INFO] Conversion complete. Saved as '{wav_file_path}'")
+#     return wav_file_path
+#
+# def split_audio(file_path, chunk_length_ms=10 * 60 * 1000):
+#     print(
+#         f"[INFO] Splitting audio file '{file_path}' into chunks of {chunk_length_ms // 60000} minutes..."
+#     )
+#     audio = AudioSegment.from_file(file_path)
+#     chunks = []
+#     for i in range(0, len(audio), chunk_length_ms):
+#         chunks.append(audio[i : i + chunk_length_ms])
+#     print(f"[INFO] Splitting complete. Total chunks: {len(chunks)}")
+#     return chunks
+#
+# def transcribe_audio_chunk(chunk, chunk_index):
+#     temp_file = f"temp_chunk_{chunk_index}.wav"
+#     print(f"[INFO] Exporting chunk {chunk_index + 1} to temporary WAV file...")
+#     chunk.export(temp_file, format="wav")
+#     print(f"[INFO] Transcribing chunk {chunk_index + 1}...")
+#     result = whisper_model.transcribe(temp_file)
+#     os.remove(temp_file)
+#     print(f"[INFO] Chunk {chunk_index + 1} transcription complete.")
+#     return format_transcription(result["text"])
+#
+# def process_large_audio_DISK_TEMP(file_path, output_directory):
+#     # ORIGINAL PIPELINE (convert to wav -> split to temp wavs -> transcribe each -> clean up)
+#     wav_file_path = convert_to_wav(file_path, output_directory)
+#     chunks = split_audio(wav_file_path)
+#     full_transcript = ""
+#     for index, chunk in enumerate(chunks):
+#         print(f"[INFO] Processing chunk {index + 1}/{len(chunks)}...")
+#         chunk_transcript = transcribe_audio_chunk(chunk, index)
+#         full_transcript += f"\n[Chunk {index + 1}]\n{chunk_transcript}"
+#     print(f"[INFO] Deleting temporary WAV file: {wav_file_path}...")
+#     os.remove(wav_file_path)
+#     print(f"[INFO] Temporary WAV file deleted.")
+#     return full_transcript
+
+
+# =========================
+# NEW: No-WAV, two modes
+# =========================
+def process_large_audio_no_split(file_path: str) -> str:
+    """
+    Simplest path: feed original file (mp3/m4a/mp4) straight to Whisper.
+    No conversion, no splitting, no temp files.
+    """
+    print(f"[INFO] Transcribing full file via Whisper (no WAV/temp files): {file_path}")
+    result = whisper_model.transcribe(file_path)  # ffmpeg used under the hood
+    return format_transcription(result["text"])
+
+
+def process_large_audio_chunked_in_memory(file_path: str) -> str:
+    """
+    Keeps your ~10-minute chunking, but entirely in-memory:
+    - Decode with whisper.load_audio (ffmpeg) → 16k mono float32 numpy array
+    - Slice by samples, pass numpy chunks directly to transcribe()
+    - No temp WAV exports
+    """
+    print(f"[INFO] Loading audio (ffmpeg) with whisper.load_audio: {file_path}")
+    audio = whisper.load_audio(file_path)  # float32 mono, resampled to 16k
+    total_samples = audio.shape[-1]
+    num_chunks = math.ceil(total_samples / CHUNK_SAMPLES)
+    print(
+        f"[INFO] Splitting into {num_chunks} chunk(s) of ~{CHUNK_SECONDS//60} minutes"
+    )
+
+    full_transcript_parts = []
+    for i in range(num_chunks):
+        start = i * CHUNK_SAMPLES
+        end = min(start + CHUNK_SAMPLES, total_samples)
+        chunk = audio[start:end]
+
+        print(
+            f"[INFO] Transcribing chunk {i+1}/{num_chunks} "
+            f"({start/SAMPLE_RATE:.1f}s – {end/SAMPLE_RATE:.1f}s)"
+        )
+        result = whisper_model.transcribe(chunk)
+        full_transcript_parts.append(
+            f"\n[Chunk {i+1}]\n{format_transcription(result['text'])}"
+        )
+
+    return "".join(full_transcript_parts)
+
+
+def process_large_audio(file_path: str, output_directory: str) -> str:
+    """
+    Entry point used by the main loop.
+    Selects between no-split or in-memory chunked flow.
+    """
+    if USE_CHUNKING:
+        return process_large_audio_chunked_in_memory(file_path)
+    else:
+        return process_large_audio_no_split(file_path)
+
+
+# =========================
+# Main
+# =========================
 if __name__ == "__main__":
     directory = r"C:\Users\Jonathan\Documents\kbdocs\text_result"
-    media_files = [f for f in os.listdir(directory) if f.endswith((".mp4", ".mp3"))]
+    media_files = [
+        f for f in os.listdir(directory) if f.endswith((".mp4", ".mp3", ".m4a"))
+    ]
 
     if not media_files:
         print("[WARNING] No media files found in the directory.")
@@ -262,17 +190,10 @@ if __name__ == "__main__":
         for media_file in media_files:
             audio_file_path = os.path.join(directory, media_file)
             print(f"[INFO] Processing file: {audio_file_path}")
+            transcript = process_large_audio(audio_file_path, directory)
+            print("[INFO] Transcription completed!")
 
-            # Process with 25-second subtitle chunks (adjust as needed)
-            translated_content = transcribe_and_translate_audio(
-                audio_file_path, directory, subtitle_duration=25
-            )
-
-            print("[INFO] Transcription and translation completed!")
-
-            # Save to file
-            output_file_name = os.path.splitext(media_file)[0] + "_translated.docx"
+            output_file_name = os.path.splitext(media_file)[0] + ".docx"
             output_file_path = os.path.join(directory, output_file_name)
-            save_to_docx(translated_content, output_file_path)
-
-            print(f"[INFO] Final output saved to: {output_file_path}")
+            save_transcription_to_docx(transcript, output_file_path)
+            print(f"[INFO] Transcription saved to: {output_file_path}")
