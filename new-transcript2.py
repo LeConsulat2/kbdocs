@@ -55,19 +55,23 @@ TRANSLATION_PROMPT = """너는 노마드코더(Nomad Coders)의 니콜라스 강
 """
 
 
-def split_by_sentences_natural(transcription_segments, max_duration=45):
+def split_by_sentences_with_timing(transcription_segments, max_duration=30):
     """
-    Split transcription into natural subtitle chunks with longer duration
+    Split transcription into subtitle-appropriate chunks based on timing and sentences
+    max_duration: maximum seconds per subtitle chunk
     """
     chunks = []
     current_chunk = {"text": "", "start": None, "end": None}
 
     for segment in transcription_segments:
+        segment_duration = segment["end"] - segment["start"]
+
         # If adding this segment would make chunk too long, finish current chunk
         if (
             current_chunk["start"] is not None
             and segment["end"] - current_chunk["start"] > max_duration
         ):
+
             if current_chunk["text"].strip():
                 chunks.append(current_chunk)
 
@@ -90,31 +94,31 @@ def split_by_sentences_natural(transcription_segments, max_duration=45):
     return chunks
 
 
-def translate_full_text_with_gpt(full_text):
+def translate_chunk_with_gpt(text_chunk, chunk_index):
     """
-    Translate the entire text at once for better flow and consistency
+    Translate a text chunk using GPT-4o-mini
     """
     try:
-        print("[INFO] Translating full transcription...")
+        print(f"[INFO] Translating chunk {chunk_index + 1}...")
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": TRANSLATION_PROMPT},
-                {"role": "user", "content": full_text},
+                {"role": "user", "content": text_chunk},
             ],
-            temperature=0.2,  # Lower temperature for consistency
-            max_tokens=20000,
+            temperature=0.2,
+            max_tokens=15000,
         )
 
         translation = response.choices[0].message.content
-        print("[INFO] Full translation complete.")
+        print(f"[INFO] Chunk {chunk_index + 1} translation complete.")
         return translation
 
     except Exception as e:
-        print(f"[ERROR] Translation failed: {e}")
+        print(f"[ERROR] Translation failed for chunk {chunk_index + 1}: {e}")
         # Fallback: return original text with basic formatting
-        lines = full_text.split(".")
+        lines = text_chunk.split(".")
         formatted = ""
         for line in lines:
             if line.strip():
@@ -122,56 +126,87 @@ def translate_full_text_with_gpt(full_text):
         return formatted
 
 
-def transcribe_and_translate_audio(file_path, output_directory, chunk_duration=45):
+def transcribe_and_translate_audio(file_path, output_directory, subtitle_duration=30):
     """
-    Main function that transcribes and translates with improved flow
+    Main function that transcribes and translates in one process
+    subtitle_duration: target duration for each subtitle chunk in seconds
     """
     # Transcribe directly with word-level timestamps
     print(f"[INFO] Transcribing '{file_path}' directly with timestamps...")
     result = whisper_model.transcribe(file_path, word_timestamps=True)
 
-    # Get full text for better translation
-    full_text = result["text"].strip()
+    # Split into subtitle-appropriate chunks
+    print(f"[INFO] Splitting transcription into {subtitle_duration}-second chunks...")
+    chunks = split_by_sentences_with_timing(result["segments"], subtitle_duration)
+    print(f"[INFO] Created {len(chunks)} subtitle chunks.")
 
-    if not full_text:
-        print("[WARNING] No transcription found.")
-        return ""
+    # Translate each chunk
+    full_translated_content = ""
+    for index, chunk in enumerate(chunks):
+        print(
+            f"[INFO] Processing chunk {index + 1}/{len(chunks)} ({chunk['start']:.1f}s - {chunk['end']:.1f}s)"
+        )
 
-    print(f"[INFO] Full transcription length: {len(full_text)} characters")
+        # Clean up the text
+        clean_text = chunk["text"].strip()
+        if not clean_text:
+            continue
 
-    # Translate the entire text at once for better flow
-    translated_content = translate_full_text_with_gpt(full_text)
+        # Translate
+        translated_chunk = translate_chunk_with_gpt(clean_text, index)
 
-    return translated_content
+        # Add timing info and content
+        full_translated_content += (
+            f"\n[Chunk {index + 1}] ({chunk['start']:.1f}s - {chunk['end']:.1f}s)\n"
+        )
+        full_translated_content += translated_chunk + "\n\n"
+
+        # Small delay to avoid rate limiting
+        time.sleep(0.5)
+
+    return full_translated_content
 
 
-def save_to_docx_improved(content, output_file):
-    """
-    Improved DOCX saving with better formatting
-    """
+def save_to_docx(content, output_file):
     print(f"[INFO] Saving to '{output_file}'...")
     doc = Document()
 
-    # Split content by lines
-    lines = content.split("\n")
+    bold_re = re.compile(r"^\s*\*\*(.+?)\*\*\s*$")  # 앞뒤 공백/개행 허용, **...** 캡처
 
-    for line in lines:
-        line = line.strip()
+    # 줄 단위 순회 (개행·공백 정리)
+    lines = content.splitlines()
+
+    for raw in lines:
+        line = raw.rstrip()  # 오른쪽 공백 제거 (Markdown의 '두 칸 공백+개행' 무력화)
         if not line:
-            # Add empty paragraph for spacing
-            doc.add_paragraph()
             continue
 
-        # Check if line starts with ** (English text)
-        if line.startswith("**") and line.endswith("**") and len(line) > 4:
-            # Bold English text
-            english_text = line[2:-2]  # Remove ** from both ends
-            p = doc.add_paragraph()
-            run = p.add_run(english_text)
-            run.bold = True
-        else:
-            # Regular Korean translation
+        # [Chunk N] 타이밍 헤더는 그대로 추가
+        if line.startswith("[Chunk "):
             doc.add_paragraph(line)
+            continue
+
+        # **영어** 패턴이면 굵게
+        m = bold_re.match(line)
+        if m:
+            p = doc.add_paragraph()
+            run = p.add_run(m.group(1))
+            run.bold = True
+            continue
+
+        # 혹시 앞은 **로 시작하지만 끝에 **가 빠진 사례까지 케어
+        if line.lstrip().startswith("**"):
+            # 맨 앞 ** 제거 후, 닫는 **가 있으면 잘라냄
+            stripped = line.lstrip()[2:]
+            end = stripped.find("**")
+            text = stripped[:end] if end != -1 else stripped
+            p = doc.add_paragraph()
+            run = p.add_run(text.strip())
+            run.bold = True
+            continue
+
+        # 일반 번역 줄
+        doc.add_paragraph(line)
 
     doc.save(output_file)
     print(f"[INFO] File saved successfully!")
@@ -189,19 +224,16 @@ if __name__ == "__main__":
             audio_file_path = os.path.join(directory, media_file)
             print(f"[INFO] Processing file: {audio_file_path}")
 
-            # Process with longer chunks for better translation flow
+            # Process with 25-second subtitle chunks (adjust as needed)
             translated_content = transcribe_and_translate_audio(
-                audio_file_path, directory, chunk_duration=60
+                audio_file_path, directory, subtitle_duration=25
             )
 
-            if translated_content:
-                print("[INFO] Transcription and translation completed!")
+            print("[INFO] Transcription and translation completed!")
 
-                # Save to file
-                output_file_name = os.path.splitext(media_file)[0] + "_translated.docx"
-                output_file_path = os.path.join(directory, output_file_name)
-                save_to_docx_improved(translated_content, output_file_path)
+            # Save to file
+            output_file_name = os.path.splitext(media_file)[0] + "_translated.docx"
+            output_file_path = os.path.join(directory, output_file_name)
+            save_to_docx(translated_content, output_file_path)
 
-                print(f"[INFO] Final output saved to: {output_file_path}")
-            else:
-                print("[WARNING] No content to save.")
+            print(f"[INFO] Final output saved to: {output_file_path}")

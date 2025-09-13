@@ -114,7 +114,7 @@ def translate_full_text_with_gpt(full_text):
                 {"role": "user", "content": full_text},
             ],
             temperature=0.2,  # Lower temperature for consistency
-            max_tokens=20000,
+            max_tokens=15000,
         )
 
         translation = response.choices[0].message.content
