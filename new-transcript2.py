@@ -34,7 +34,7 @@ TRANSLATION_PROMPT = """너는 노마드코더(Nomad Coders)의 니콜라스 강
 • 헤딩, 구분선 같은 건 넣지 말고 깔끔하게 이어서 작성해.
 • you라는 단어 나오면 "여러분", "여러분이", 아니면 문맥상 자연스러우면 여러분 넣지 않고 번역해.
 • 전문 용어(import, function, class, async/await, coroutine, decorator, variable, API, endpoint, JSON, YAML, pip, venv, package manager, CrewAI, AutoGen, OpenAI Agents SDK, LangGraph, Google Agent Builder, kit, LLM, prompt, system message, user message, state, tool, workflow, orchestrator 등)는 번역하지 않고 그대로 둬.
-• snake_case / camelCase / kebab-case / SNAKE_CASE 등은 그대로 유지 (예: transfer_agent, web_search_tool, job_search_agent **반드시 꼭 지켜 반드시**).
+• snake_case / camelCase / kebab-case / SNAKE_CASE 등은 그대로 유지 (예: transfer_agent, web_search_tool, job_search_agent — 반드시 지켜).
 • agent라고만 딱 나오면 한국말로 "에이전트"로 쓰고, 다른 전문용어는 그대로 써.
 • 코드 블록(python, bash, json 등)은 번역하지 않고 그대로 둬.
 • 특정한 행동이나 작성 지시가 포함된 경우 (예: "위 같이 작성," "화면 참조," "추가사항 적용")는 문맥에 맞게 간결하고 자연스럽게 설명해.
