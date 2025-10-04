@@ -291,7 +291,7 @@ if __name__ == "__main__":
 
                 # Save to DOCX
                 base_name = os.path.splitext(media_file)[0]
-                docx_output = os.path.join(directory, f"{base_name}_transcript.docx")
+                docx_output = os.path.join(directory, f"{base_name}_eng-only.docx")
                 save_transcript_to_docx(formatted_transcript, docx_output)
 
                 # Also save to TXT for easy reading
