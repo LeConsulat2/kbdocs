@@ -302,7 +302,7 @@ def save_to_docx_improved(content, output_file):
             continue
 
         # **로 감싸진 줄 = 영어 원문 (Bold 처리)
-        bold_match = re.match(r"^\s*\*\*(.+?)\*\*\s*$", line)
+        bold_match = re.match(r"\*\*(.*?)\*\*", line)
         if bold_match:
             english_text = bold_match.group(1).strip()
             if english_text:
